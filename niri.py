@@ -86,6 +86,12 @@ class LinkedList:
         else: 
             self.stack = b
 
+    def debug_print(self): 
+        cur = self.stack
+        while cur:
+            print(cur, end = ' ')
+            cur = cur.next
+
 class Window(Rect, Node):
     def __init__(self, data, id):
         self.id: int = id
@@ -172,6 +178,10 @@ class Container(Node, LinkedList):
         self.width: int = SCREEN.width//2
 
     async def organise(self, x: int) -> None:
+        # theres an annoying edge case I can't fix
+        if self.size == 0: 
+            print("BAD BAD ", self)
+            return
         height = SCREEN.height // self.size
         p = SCREEN.y + SCREEN.height
         cur = self.stack
@@ -378,8 +388,8 @@ class Niri(LinkedList):
 
             if new_focus and new_focus.stack and self.current == workspace: 
                 await new_focus.stack.focus(i3)
-            else:
-                await self.updateinfo()
+            # else:
+            #     await self.updateinfo()
         else: 
             cont.remove(win)
             if self.current == workspace:
@@ -592,18 +602,24 @@ class Niri(LinkedList):
         focus: Container = self.current.focus
         if self.current.prev: 
             self.current.remove(focus)
-            self.current.prev.add(focus)
             if self.current.size == 0: 
                 self.remove(self.current)
+            else:
+                self.current.focus = focus.next or focus.prev
+            self.current.prev.add(focus)
             self.current = self.current.prev
         else:
             if self.current.size == 1:
                 return
             newws = Workspace()
-            self.add(newws)
             self.current.remove(focus)
+            self.current.focus = focus.next or focus.prev
+            self.add(newws)
             newws.add(focus)
             self.current = newws
+
+        self.current.focus = focus
+        await self.current.focus_cont(focus)
         await self.move_all()
 
     async def workspace_with_win(self, id: int) -> tuple[Workspace, Container, Window] | None:
@@ -638,6 +654,16 @@ class Niri(LinkedList):
                         wcur = wcur.next
                     ccur = ccur.next
                 wscur = wscur.next
+
+        # debug
+        cur = self.stack 
+        while cur:
+            print("focused:", cur.focus)
+            cur.debug_print()
+            print()
+            cur = cur.next
+        print()
+        print()
 
     async def updateinfo(self) -> None: 
         translate = {

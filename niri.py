@@ -15,6 +15,7 @@ Add to readme:
     - only works on single monitor
 """
 
+TRUE_SCREEN_HEIGHT = 1080
 SCREEN = Rect(dict(
     x = 5,
     y = 55,
@@ -640,7 +641,7 @@ class Niri(LinkedList):
                     wcur = ccur.stack
                     while wcur:
                         if self.current != wscur: 
-                            tg.create_task(wcur.move_win(self.i3, tree, 1080 if passed else -1080))
+                            tg.create_task(wcur.move_win(self.i3, tree, TRUE_SCREEN_HEIGHT if passed else -TRUE_SCREEN_HEIGHT))
                         else:
                             tg.create_task(wcur.move_win(self.i3, tree))
                         wcur = wcur.next

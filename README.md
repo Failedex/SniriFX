@@ -5,7 +5,7 @@ https://github.com/user-attachments/assets/8b5948b3-e002-451c-9607-2fee639af38a
 
 ## About
 
-An impractical sway script that mimics the scrollable-tiling behavior of [Niri](https://github.com/YaLTeR/niri), including the animations.
+SniriFX is an impractical sway script that mimics the scrollable-tiling behavior of [Niri](https://github.com/YaLTeR/niri), including the animations.
 
 SniriFX is a rewrite of [citsfsip](https://github.com/Failedex/citsfsip), but includes a much more complicated tiling system. Although it has cleaner code and fewer bugs than it's predecessor, I would still consider it impractical and not fit for normal usage. 
 

@@ -1,19 +1,19 @@
 #! /usr/bin/env python3
-from i3ipc import Con, Rect, Event, WindowEvent
+from i3ipc import Con, Rect, Event, WindowEvent, WorkspaceEvent
 from i3ipc.aio import Connection
 from i3ipc.events import WindowEvent
 import time
 import asyncio
 
-# import subprocess
-# import os
+import subprocess
+import os
 import json
 from iconfetch import fetch
 
 """
 TODO buglist:
     - highest window should be focused first
-    - workspace support
+    - workspaces not being removed
 Add to readme:
     - mouse_warping none
     - all bindings
@@ -36,12 +36,63 @@ try:
 except:
     DX = lambda t: 1 - (1-t)*(1-t)
 
-class Window(Rect):
+class Node: 
+    def __init__(self)-> None: 
+        self.next: Node | None = None
+        self.prev: Node | None = None
+
+class LinkedList:
+    def __init__(self) -> None:
+        self.stack: Node | None = None
+        self.size = 0
+    
+    def add(self, new: Node, root: Node | None = None) -> None: 
+        self.size += 1
+        if root:
+            new.prev = root
+            new.next = root.next
+            if root.next:
+                root.next.prev = new
+            root.next = new
+        else:
+            new.next = self.stack
+            if self.stack:
+                self.stack.prev = new
+            new.prev = None
+            self.stack = new
+
+    def remove(self, node: Node) -> None:
+        self.size -= 1
+        if node.prev:
+            node.prev.next = node.next
+        else:
+            self.stack = node.next
+        if node.next:
+            node.next.prev = node.prev
+
+    def swap(self, a: Node, b: Node) -> None:
+        a.next, b.next = b.next, a.next
+        if a.next:
+            a.next.prev = a
+        if b.next: 
+            b.next.prev = b
+        a.prev, b.prev = b.prev, a.prev
+        if a.prev:
+            a.prev.next = a
+        else: 
+            self.stack = a
+        if b.prev:
+            b.prev.next = b
+        else: 
+            self.stack = b
+
+class Window(Rect, Node):
     def __init__(self, data, id):
         self.id: int = id
-        self.next: Window | None = None
-        self.prev: Window | None = None
-        super().__init__(data)
+        self.next: Window | None
+        self.prev: Window | None
+        Node.__init__(self)
+        Rect.__init__(self, data)
 
     def __eq__(self, other):
         if not other:
@@ -68,9 +119,9 @@ class Window(Rect):
         if height is not None:
             self.height = height - 2*margin
 
-    async def move(self, i3, a, dx) -> None:
+    async def move(self, i3: Connection, a: Rect, dx: float, dy:int=0) -> None:
         x = a.x + (self.x-a.x)*dx
-        y = a.y + (self.y-a.y)*dx
+        y = a.y + ((self.y+dy)-a.y)*dx
         width = a.width + (self.width-a.width)*dx
         height = a.height + (self.height-a.height)*dx
 
@@ -80,46 +131,45 @@ class Window(Rect):
     async def focus(self, i3) -> None: 
         await i3.command(f"[con_id={self.id}] focus")
 
-class Container(): 
+    async def move_win(self, i3, tree, dy=0): 
+        global animid
+        aid = animid
+        win = tree.find_by_id(self.id)
+        if not win:
+            print("WTF")
+            exit(1)
+        win.rect.y -= win.deco_rect.height
+        win.rect.height += win.deco_rect.height
+
+        start = time.time()
+        frames = int(DURATION * FPS)
+
+        for _ in range(frames): 
+            fstart = time.time()
+            t = (fstart - start) / DURATION
+            dx = DX(t)
+
+            if t >= 1:
+                dx = 1
+
+            if aid != animid:
+                return
+
+            await self.move(i3, win.rect, dx, dy)
+            
+            if t >= 1:
+                return 
+
+            await asyncio.sleep(max(1/FPS-(fstart-time.time()), 0))
+
+class Container(Node, LinkedList): 
     def __init__(self):
-        self.next: Container | None = None
-        self.prev: Container | None = None
-        self.stack: Window | None = None
-        self.size: int = 0
+        self.next: Container | None
+        self.prev: Container | None
+        self.stack: Window | None
+        Node.__init__(self)
+        LinkedList.__init__(self)
         self.width: int = SCREEN.width//2
-
-    async def add_win(self, win): 
-        self.size += 1
-        win.next = self.stack
-        if self.stack:
-            self.stack.prev = win
-        win.prev = None
-        self.stack = win
-
-    async def remove_win(self, win): 
-        self.size -= 1
-        if win.prev:
-            win.prev.next = win.next
-        else:
-            self.stack = win.next
-        if win.next:
-            win.next.prev = win.prev
-
-    async def swap_win(self, a: Window, b: Window) -> None:
-        a.next, b.next = b.next, a.next
-        if a.next:
-            a.next.prev = a
-        if b.next: 
-            b.next.prev = b
-        a.prev, b.prev = b.prev, a.prev
-        if a.prev:
-            a.prev.next = a
-        else: 
-            self.stack = a
-        if b.prev:
-            b.prev.next = b
-        else: 
-            self.stack = b
 
     async def organise(self, x: int) -> None:
         height = SCREEN.height // self.size
@@ -143,272 +193,20 @@ class Container():
             cur = cur.next
         return None
 
-    async def move_wins(self, i3, tree): 
-        global animid
-        # if another animation starts running, this one will be cancelled
-        aid = animid
-
-        current = []
-        cur = self.stack
-        while cur: 
-            win = tree.find_by_id(cur.id)
-            if not win: 
-                print("WTF")
-                exit(1)
-            win.rect.y -= win.deco_rect.height
-            win.rect.height += win.deco_rect.height
-            current.append(win.rect)
-
-            cur = cur.next
-
-        start = time.time()
-        frames = int(DURATION * FPS)
-
-        for _ in range(frames):
-            fstart = time.time()
-            t = (fstart - start)/DURATION
-            dx = DX(t)
-
-            if t >= 1: 
-                dx = 1
-
-            cur = self.stack
-            j = 0 
-            while cur:
-                if aid != animid: 
-                    return 
-
-                await cur.move(i3, current[j], dx)
-                j+= 1
-                cur = cur.next
-
-            if t >= 1:
-                return
-
-            await asyncio.sleep(max(1/FPS-(fstart-time.time()), 0))
-
-class Niri():
+class Workspace(Node, LinkedList):
     def __init__(self):
-        self.stack: Container | None = None
         self.anchor: Container | None = None
         self.focus: Container | None = None
         # 0 is left, 1 is right
         self.anchordir: float = 0
 
-    async def setup(self): 
-        self.i3 = await Connection().connect()
+        self.stack: Container | None
+        self.next: Workspace | None
+        self.prev: Workspace | None
+        Node.__init__(self)
+        LinkedList.__init__(self)
 
-        await self.i3.command("bindsym Mod4+k mark '_up'")
-        await self.i3.command("bindsym Mod4+j mark '_down'")
-        await self.i3.command("bindsym Mod4+h mark '_left'")
-        await self.i3.command("bindsym Mod4+l mark '_right'")
-        await self.i3.command("bindsym Mod4+equal mark '_incwidth'")
-        await self.i3.command("bindsym Mod4+minus mark '_decwidth'")
-        await self.i3.command("bindsym Mod4+Ctrl+h mark '_moveleft'")
-        await self.i3.command("bindsym Mod4+Ctrl+l mark '_moveright'")
-        await self.i3.command("bindsym Mod4+Shift+h mark '_swapleft'")
-        await self.i3.command("bindsym Mod4+Shift+l mark '_swapright'")
-        await self.i3.command("bindsym Mod4+Shift+j mark '_movedown'")
-        await self.i3.command("bindsym Mod4+Shift+k mark '_moveup'")
-        await self.i3.command("bindsym Mod4+c mark '_center'")
-        await self.i3.command("bindsym Mod4+Shift+c mark '_fullwidth'")
-
-        self.i3.on(Event.WINDOW_FOCUS, self.focus_win) # type: ignore
-        self.i3.on(Event.WINDOW_CLOSE, self.close_win) # type: ignore
-        self.i3.on(Event.WINDOW_MARK, self.mark_win) # type: ignore
-
-        await self.i3.main()
-
-    async def add_win(self, e:WindowEvent) -> None:
-        await e.container.command("floating enable") #type: ignore
-        ncont:Container = Container()
-        new = Window(dict(
-            x = 0, 
-            y = 0, 
-            width = 100, 
-            height = 100
-        ), e.container.id) #type: ignore
-
-        await ncont.add_win(new)
-
-        if self.focus:
-            ncont.prev = self.focus
-            ncont.next = self.focus.next    
-            if self.focus.next:
-                self.focus.next.prev = ncont
-            self.focus.next = ncont
-            await self.focus_cont(ncont)
-        else:
-            ncont.next = self.stack
-            self.stack = ncont
-            await self.anchor_set(ncont, 0)
-        self.focus = ncont
-
-    async def focus_win(self, i3, e) -> None: 
-        res = await self.cont_with_win(e.container.id)
-        if not res:
-            # Add window
-            await self.add_win(e)
-            return
-        self.focus = res[0]
-        await self.focus_cont(res[0])
-
-    async def close_win(self, i3, e) -> None:
-        res = await self.cont_with_win(e.container.id)
-        if not res:
-            return
-        cont, win = res
-        
-        if cont.size == 1: 
-            fd = int(2*self.anchordir - 1) * (-1 if cont != self.anchordir else 1)
-            new_focus = None
-            if fd < 0: 
-                if cont.prev: 
-                    new_focus = cont.prev
-                elif cont.next:
-                    new_focus = cont.next
-            else:
-                if cont.next:
-                    new_focus = cont.next
-                elif cont.prev: 
-                    new_focus = cont.prev
-
-            if self.anchor == cont:
-                self.anchor = new_focus
-
-            await cont.remove_win(win)
-            await self.remove_cont(cont)
-
-            if new_focus and new_focus.stack:
-                await new_focus.stack.focus(self.i3) 
-            else:
-                self.focus = None
-        else:
-            await cont.remove_win(win)
-            if win.next:
-                await win.next.focus(self.i3)
-            elif win.prev:
-                await win.prev.focus(self.i3)
-    
-    async def mark_win(self, i3, e):
-        marks = e.container.marks
-
-        if len(marks) == 0:
-            return
-
-        await e.container.command("unmark")
-
-        res = await self.cont_with_win(e.container.id)
-        if not res:
-            return
-        cont, win = res
-
-        if "_left" in marks:
-            if cont.prev and cont.prev.stack: 
-                await cont.prev.stack.focus(self.i3)
-
-        if "_right" in marks:
-            if cont.next and cont.next.stack: 
-                await cont.next.stack.focus(self.i3)
-
-        if "_down" in marks:
-            if win.prev: 
-                await win.prev.focus(self.i3)
-
-        if "_up" in marks:
-            if win.next: 
-                await win.next.focus(self.i3)
-
-        if "_decwidth" in marks:
-            cont.width -= DWIDTH
-            cont.width = max(cont.width, 150)
-            await self.focus_cont(cont)
-
-        if "_incwidth" in marks:
-            cont.width += DWIDTH
-            cont.width = min(cont.width, SCREEN.width)
-            await self.focus_cont(cont)
-
-        if "_fullwidth" in marks:
-            cont.width = SCREEN.width
-            await self.focus_cont(cont)
-
-        if "_moveleft" in marks:
-            await cont.remove_win(win)
-            if cont.size == 0:
-                if cont.prev: 
-                    await self.remove_cont(cont)
-                    await cont.prev.add_win(win)
-                    if self.anchor == cont:
-                        self.anchor = cont.prev
-                    await self.focus_cont(cont.prev)
-            else:
-                ncont:Container = Container() # type: ignore
-                await ncont.add_win(win)
-                ncont.prev = cont.prev
-                ncont.next = cont
-                if cont.prev:
-                    cont.prev.next = ncont
-                else:
-                    self.stack = ncont
-                cont.prev = ncont
-                await self.focus_cont(ncont)
-
-        if "_moveright" in marks:
-            await cont.remove_win(win)
-            if cont.size == 0:
-                if cont.next: 
-                    await cont.next.add_win(win)
-                    await self.remove_cont(cont)
-                    if self.anchor == cont:
-                        self.anchor = cont.next
-                    await self.focus_cont(cont.next)
-            else:
-                ncont:Container = Container()
-                await ncont.add_win(win)
-                ncont.next = cont.next
-                ncont.prev = cont
-                if cont.next:
-                    cont.next.prev = ncont
-                cont.next = ncont
-                await self.focus_cont(ncont)
-
-        if "_swapleft" in marks:
-            if cont.prev:
-                if self.anchor == cont:
-                    self.anchor = cont.prev
-                await self.swap_con(cont.prev, cont)
-                await self.focus_cont(cont)
-
-        if "_swapright" in marks:
-            if cont.next:
-                if self.anchor == cont:
-                    self.anchor = cont.next
-                await self.swap_con(cont, cont.next)
-                await self.focus_cont(cont)
-
-        if "_moveup" in marks:
-            if win.next:
-                await cont.swap_win(win, win.next)
-                await self.focus_cont(cont)
-
-        if "_movedown" in marks:
-            if win.prev:
-                await cont.swap_win(win.prev, win)
-                await self.focus_cont(cont)
-
-        if "_center" in marks:
-            await self.anchor_set(cont, 0.5)
-
-    async def remove_cont(self, cont): 
-        if cont.prev:
-            cont.prev.next = cont.next
-        else:
-            self.stack = cont.next
-        if cont.next:
-            cont.next.prev = cont.prev
-
-    async def cont_with_win(self, id) -> tuple[Container, Window] | None:
+    async def cont_with_win(self, id: int) -> tuple[Container, Window] | None:
         cur = self.stack
 
         while cur:
@@ -418,25 +216,11 @@ class Niri():
             cur = cur.next
         return None
 
-    async def swap_con(self, a: Container, b: Container) -> None:
-        a.next, b.next = b.next, a.next
-        if a.next:
-            a.next.prev = a
-        if b.next: 
-            b.next.prev = b
-        a.prev, b.prev = b.prev, a.prev
-        if a.prev:
-            a.prev.next = a
-        else: 
-            self.stack = a
-        if b.prev:
-            b.prev.next = b
-        else: 
-            self.stack = b
-
     async def focus_cont(self, cont: Container) -> None:
         if not self.anchor: 
-            return 
+            self.anchor = cont
+            self.anchordir = 0
+            self.focus = cont
 
         # if left of screen has space, anchor at start
         if self.anchordir == 1:
@@ -502,22 +286,360 @@ class Niri():
                     cur = cur.next
                 else:
                     cur = cur.prev
-        
+
+
+class Niri(LinkedList):
+    def __init__(self):
+        self.stack: Workspace
+        LinkedList.__init__(self)
+        self.add(Workspace())
+        self.current: Workspace = self.stack
+
+    async def setup(self): 
+        self.i3 = await Connection().connect()
+
+        await self.i3.command("mouse_warping none")
+        await self.i3.command("bindsym Mod4+k mark '_up'")
+        await self.i3.command("bindsym Mod4+j mark '_down'")
+        await self.i3.command("bindsym Mod4+h mark '_left'")
+        await self.i3.command("bindsym Mod4+l mark '_right'")
+        await self.i3.command("bindsym Mod4+equal mark '_incwidth'")
+        await self.i3.command("bindsym Mod4+minus mark '_decwidth'")
+        await self.i3.command("bindsym Mod4+Ctrl+h mark '_moveleft'")
+        await self.i3.command("bindsym Mod4+Ctrl+l mark '_moveright'")
+        await self.i3.command("bindsym Mod4+Shift+h mark '_swapleft'")
+        await self.i3.command("bindsym Mod4+Shift+l mark '_swapright'")
+        await self.i3.command("bindsym Mod4+Shift+j mark '_movedown'")
+        await self.i3.command("bindsym Mod4+Shift+k mark '_moveup'")
+        await self.i3.command("bindsym Mod4+c mark '_center'")
+        await self.i3.command("bindsym Mod4+Shift+c mark '_fullwidth'")
+
+        self.i3.on(Event.WINDOW_FOCUS, self.focus_win) # type: ignore
+        self.i3.on(Event.WINDOW_CLOSE, self.close_win) # type: ignore
+        self.i3.on(Event.WINDOW_MARK, self.mark_win) # type: ignore
+        # self.i3.on(Event.WORKSPACE_FOCUS, self.focus_workspace) # type: ignore
+
+        await self.i3.main()
+
+    async def add_win(self, e:WindowEvent) -> None:
+        await e.container.command("floating enable")  #type: ignore
+        ncont:Container = Container()
+        new = Window(dict(
+            x = 0,
+            y = 0,
+            width = 100, 
+            height = 100
+        ), e.container.id) # type: ignore
+
+        ncont.add(new)
+        self.current.add(ncont, self.current.focus)
+        self.current.focus = ncont
+
+        await self.current.focus_cont(ncont)
         await self.move_all()
 
-    async def move_all(self):
+    async def focus_win(self, i3:Connection, e:WindowEvent) -> None: 
+        res = await self.workspace_with_win(e.container.id) # type: ignore
+        if not res: 
+            await self.add_win(e)
+            return
+        workspace, cont, _ = res
+        workspace.focus = cont
+        self.current = workspace
+        await workspace.focus_cont(cont)
+        await self.move_all()
+
+    async def close_win(self, i3:Connection, e:WindowEvent) -> None: 
+        res = await self.workspace_with_win(e.container.id) # type: ignore
+        if not res: 
+            return
+        workspace, cont, win = res
+        
+        if cont.size == 1:
+            fd = int(2*workspace.anchordir-1) * (-1 if cont != workspace.anchordir else 1)
+            new_focus = None
+            if fd < 0: 
+                if cont.prev: 
+                    new_focus = cont.prev
+                elif cont.next:
+                    new_focus = cont.next
+            else:
+                if cont.next: 
+                    new_focus = cont.next
+                elif cont.prev:
+                    new_focus = cont.prev
+            
+            if workspace.anchor == cont: 
+                workspace.anchor = new_focus
+
+            cont.remove(win)
+            workspace.remove(cont)
+            workspace.focus = new_focus
+
+            if new_focus and new_focus.stack and self.current == workspace: 
+                await new_focus.stack.focus(i3)
+            else:
+                await self.updateinfo()
+        else: 
+            cont.remove(win)
+            if self.current == workspace:
+                if win.next:
+                    await win.next.focus(i3)
+                elif win.prev: 
+                    await win.prev.focus(i3)
+
+        # if workspace empty and not focused, delete it
+        if workspace.size == 0 and self.size > 1: 
+            self.remove(workspace)
+
+    async def mark_win(self, i3: Connection, e: WindowEvent) -> None: 
+        marks = e.container.marks
+
+        if len(marks) == 0:
+            return 
+
+        await e.container.command("unmark") # type: ignore
+
+        res = await self.workspace_with_win(e.container.id) # type: ignore
+        if not res:
+            return 
+        workspace, cont, win = res
+
+        if "_left" in marks:
+            if cont.prev and cont.prev.stack:
+                await cont.prev.stack.focus(i3)
+
+        if "_right" in marks: 
+            if cont.next and cont.next.stack: 
+                await cont.next.stack.focus(i3)
+
+        if "_down" in marks:
+            if win.prev and self.current == workspace: 
+                await win.prev.focus(i3)
+            else:
+                await self.workspace_down()
+
+        if "_up" in marks:
+            if win.next and self.current == workspace:
+                await win.next.focus(i3)
+            else:
+                await self.workspace_up()
+
+        if "_decwidth" in marks:
+            cont.width -= DWIDTH
+            cont.width = max(cont.width, 150)
+            await workspace.focus_cont(cont)
+            await self.move_all()
+
+        if "_incwidth" in marks: 
+            cont.width += DWIDTH
+            cont.width = min(cont.width, SCREEN.width)
+            await workspace.focus_cont(cont)
+            await self.move_all()
+
+        if "_fullwidth" in marks:
+            cont.width = SCREEN.width
+            await workspace.focus_cont(cont)
+            await self.move_all()
+
+        if "_moveleft" in marks:
+            cont.remove(win)
+            if cont.size == 0: 
+                if cont.prev: 
+                    workspace.remove(cont)
+                    cont.prev.add(win)
+                    if workspace.anchor == cont: 
+                        workspace.anchor = cont.prev
+                    await workspace.focus_cont(cont.prev)
+                    await self.move_all()
+            else:
+                ncont: Container = Container() # type: ignore
+                ncont.add(win)
+                workspace.add(ncont, cont.prev)
+                await workspace.focus_cont(ncont)
+                await self.move_all()
+
+        if "_moveright" in marks:
+            cont.remove(win)
+            if cont.size == 0: 
+                if cont.next: 
+                    workspace.remove(cont)
+                    cont.next.add(win)
+                    if workspace.anchor == cont: 
+                        workspace.anchor = cont.prev
+                    await workspace.focus_cont(cont.next)
+                    await self.move_all()
+            else:
+                ncont: Container = Container() 
+                ncont.add(win)
+                workspace.add(ncont, cont)
+                await workspace.focus_cont(ncont)
+                await self.move_all()
+
+        if "_swapleft" in marks:
+            if cont.prev:
+                if workspace.anchor == cont: 
+                    workspace.anchor = cont.prev
+                workspace.swap(cont.prev, cont)
+                await workspace.focus_cont(cont)
+                await self.move_all()
+        
+        if "_swapright" in marks:
+            if cont.next:
+                if workspace.anchor == cont: 
+                    workspace.anchor = cont.next
+                workspace.swap(cont, cont.next)
+                await workspace.focus_cont(cont)
+                await self.move_all()
+
+        if "_moveup" in marks:
+            if win.next:
+                cont.swap(win, win.next)
+                await self.move_all()
+            else: 
+                await self.workspace_move_up()
+
+        if "_movedown" in marks:
+            if win.prev:
+                cont.swap(win.prev, win)
+                await self.move_all()
+            else: 
+                await self.workspace_move_down()
+
+        if "_center" in marks:
+            await workspace.anchor_set(cont, 0.5)
+            await self.move_all()
+
+    async def focus_workspace(self, i3: Connection, e: WorkspaceEvent): 
+        try:
+            num: int= min(int(e.current.name), self.size) # type: ignore
+        except:
+            return
+        cur = self.stack
+        i = 1
+        while cur: 
+            if i == num:
+                self.current = cur
+                if self.current.focus and self.current.focus.stack:
+                    await self.current.focus.stack.focus(self.i3)
+                else:
+                    await self.move_all()
+                return
+            i += 1
+            cur = cur.next
+
+    async def workspace_down(self) -> None:
+        if self.current.size != 0:
+            if not self.current.next:
+                self.add(Workspace(), self.current)
+        else: 
+            if self.current.next:
+                self.remove(self.current)
+            
+        if self.current.next:
+            self.current = self.current.next
+
+        if self.current.focus and self.current.focus.stack:
+            await self.current.focus.stack.focus(self.i3)
+        await self.move_all()
+
+    async def workspace_up(self) -> None:
+        if self.current.size != 0:
+            if not self.current.prev:
+                self.add(Workspace())
+        else: 
+            if self.current.prev:
+                self.remove(self.current)
+            
+        if self.current.prev:
+            self.current = self.current.prev
+
+        if self.current.focus and self.current.focus.stack:
+            await self.current.focus.stack.focus(self.i3)
+        await self.move_all()
+
+    async def workspace_move_down(self) -> None:
+        if not self.current.focus:
+            return
+
+        focus: Container = self.current.focus
+        if self.current.next: 
+            self.current.remove(focus)
+            if self.current.size == 0: 
+                self.remove(self.current)
+            else:
+                self.current.focus = focus.next or focus.prev
+            self.current.next.add(focus)
+            self.current = self.current.next
+        else:
+            if self.current.size == 1:
+                return
+            newws = Workspace()
+            self.current.remove(focus)
+            self.current.focus = focus.next or focus.prev
+            self.add(newws, self.current)
+            newws.add(focus)
+            self.current = newws
+
+        self.current.focus = focus
+        await self.current.focus_cont(focus)
+        await self.move_all()
+
+    async def workspace_move_up(self):
+        if not self.current.focus:
+            return
+
+        focus: Container = self.current.focus
+        if self.current.prev: 
+            self.current.remove(focus)
+            self.current.prev.add(focus)
+            if self.current.size == 0: 
+                self.remove(self.current)
+            self.current = self.current.prev
+        else:
+            if self.current.size == 1:
+                return
+            newws = Workspace()
+            self.add(newws)
+            self.current.remove(focus)
+            newws.add(focus)
+            self.current = newws
+        await self.move_all()
+
+    async def workspace_with_win(self, id: int) -> tuple[Workspace, Container, Window] | None:
+
+        wcur = self.stack
+        while wcur: 
+            res = await wcur.cont_with_win(id)
+            if res: 
+                return (wcur, res[0], res[1])
+            wcur = wcur.next
+
+    async def move_all(self): 
         global animid
-        cur = self.stack 
         tree = await self.i3.get_tree()
 
         animid += 1
+        passed: bool = False
         async with asyncio.TaskGroup() as tg:
             # tg.create_task(self.updateinfo())
-            while cur: 
-                tg.create_task(cur.move_wins(self.i3, tree))
-                cur = cur.next
+            wscur = self.stack
+            while wscur: 
+                if self.current == wscur:
+                    passed = True
+                ccur = wscur.stack
+                while ccur:
+                    wcur = ccur.stack
+                    while wcur:
+                        if self.current != wscur: 
+                            tg.create_task(wcur.move_win(self.i3, tree, 1080 if passed else -1080))
+                        else:
+                            tg.create_task(wcur.move_win(self.i3, tree))
+                        wcur = wcur.next
+                    ccur = ccur.next
+                wscur = wscur.next
 
-    async def updateinfo(self): 
+    async def updateinfo(self) -> None: 
         translate = {
             "com.github.xournalpp.xournalpp": "xournalpp",
             "sterm": "foot",
@@ -528,26 +650,27 @@ class Niri():
         data = {}
         data["focus"] = 0
         data["windows"] = []
+        data["workspace"] = []
 
         tree = await self.i3.get_tree()
-        ccur = self.stack
+        ccur = self.current.stack
         p = 5
         while ccur: 
-            if ccur == self.anchor: 
-                data["focus"] = p + self.anchordir*(ccur.width - SCREEN.width) - 5
+            if ccur == self.current.anchor: 
+                data["focus"] = p + self.current.anchordir*(ccur.width - SCREEN.width) - 5
 
             wcur = ccur.stack
             while wcur: 
                 win: Con|None = tree.find_by_id(wcur.id)
                 if win: 
-                    app_id = app_id.lower()
-                    app_id = translate.get(win.app_id, win.app_id)
+                    app_id = win.app_id.lower()
+                    app_id = translate.get(app_id, app_id)
                     path = fetch(app_id) or fetch("unknown")
                     rect = {}
-                    rect["x"] = p + 5
-                    rect["y"] = wcur.y - 55
-                    rect["width"] = wcur.width
-                    rect["height"] = wcur.height
+                    rect["x"] = p + 5 + 5
+                    rect["y"] = wcur.y - 50 + 5
+                    rect["width"] = wcur.width - 10
+                    rect["height"] = wcur.height - 10
                     data["windows"].append({
                         "app_id": win.app_id,
                         "name": win.name,
@@ -562,11 +685,16 @@ class Niri():
 
             ccur = ccur.next
 
+        wscur = self.stack
+        while wscur: 
+            data["workspace"].append(wscur == self.current)
+            wscur = wscur.next
+
         data["width"] = max(1920, p+5)
         data = json.dumps(data)
-        # eww_bin= [subprocess.getoutput("which eww"), "-c", f"{os.path.expanduser('~/.config/eww/whimsy')}"]
-        # subprocess.Popen(eww_bin+["update", f"nirijson={data}"])
-        print(data, flush=True)
+        eww_bin= [subprocess.getoutput("which eww"), "-c", f"{os.path.expanduser('~/.config/eww/whimsy')}"]
+        subprocess.Popen(eww_bin+["update", f"nirijson={data}"])
+        # print(data, flush=True)
 
 if __name__ == "__main__": 
     animid: int = 0

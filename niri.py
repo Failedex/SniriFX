@@ -134,10 +134,10 @@ class Window(Rect, Node):
         await i3.command(f"[con_id={self.id}] resize set width {int(width)}px height {int(height)}px")
         await i3.command(f"[con_id={self.id}] move absolute position {int(x)}px {int(y)}px")
 
-    async def focus(self, i3) -> None: 
+    async def focus(self, i3:Connection) -> None: 
         await i3.command(f"[con_id={self.id}] focus")
 
-    async def move_win(self, i3, tree, dy=0): 
+    async def move_win(self, i3:Connection, tree, dy=0): 
         global animid
         aid = animid
         win = tree.find_by_id(self.id)
@@ -179,9 +179,6 @@ class Container(Node, LinkedList):
 
     async def organise(self, x: int) -> None:
         # theres an annoying edge case I can't fix
-        if self.size == 0: 
-            print("BAD BAD ", self)
-            return
         height = SCREEN.height // self.size
         p = SCREEN.y + SCREEN.height
         cur = self.stack
@@ -505,16 +502,19 @@ class Niri(LinkedList):
         if "_moveup" in marks:
             if win.next:
                 cont.swap(win, win.next)
+                await workspace.focus_cont(cont)
                 await self.move_all()
-            else: 
-                await self.workspace_move_up()
+            # This does not work yet, and I don't know why. If you do find out, please let me know
+            # else: 
+            #     await self.workspace_move_up()
 
         if "_movedown" in marks:
             if win.prev:
                 cont.swap(win.prev, win)
+                await workspace.focus_cont(cont)
                 await self.move_all()
-            else: 
-                await self.workspace_move_down()
+            # else: 
+            #     await self.workspace_move_down()
 
         if "_center" in marks:
             await workspace.anchor_set(cont, 0.5)
@@ -654,16 +654,6 @@ class Niri(LinkedList):
                         wcur = wcur.next
                     ccur = ccur.next
                 wscur = wscur.next
-
-        # debug
-        cur = self.stack 
-        while cur:
-            print("focused:", cur.focus)
-            cur.debug_print()
-            print()
-            cur = cur.next
-        print()
-        print()
 
     async def updateinfo(self) -> None: 
         translate = {

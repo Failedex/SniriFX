@@ -52,8 +52,8 @@ Default key bindings are shown below
 | `Mod4+j`                 | focus down   |
 | `Mod4+h`                 | focus left   |
 | `Mod4+l`                 | focus right  |
-| `Mod4+e`qual             | increase width |
-| `Mod4+m`inus             | decrease width | 
+| `Mod4+equal`             | increase width |
+| `Mod4+minus`             | decrease width | 
 | `Mod4+Shift+c`           | screen width |
 | `Mod4+Ctrl+h`            | merge left |
 | `Mod4+Ctrl+l`            | merge right |
@@ -63,7 +63,7 @@ Default key bindings are shown below
 | `Mod4+Shift+k`           | swap up |
 | `Mod4+c`                 | center |
 
-These key binds can be changed in line 304 of `niri.py`
+These bindings can be changed in line 304 of `niri.py`
 
 ## Dotfiles for January post of the month
 

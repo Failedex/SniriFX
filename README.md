@@ -1,5 +1,7 @@
 <h1 align="center">SniriFX</h1>
-<p align="center">An impractical ipc script</p>
+<p align="center">An impractical ipc script that mimics niri</p>
+
+https://github.com/user-attachments/assets/8b5948b3-e002-451c-9607-2fee639af38a
 
 ## About
 

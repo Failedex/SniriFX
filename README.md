@@ -16,7 +16,7 @@ SniriFX is a rewrite of [citsfsip](https://github.com/Failedex/citsfsip), but in
 - Due to how windows are displayed in sway, this only works for a single screen (there may be ways around this). 
 - Workspaces are managed separately from sway, which had to be done for animations to work.
 - Moving windows between workspaces have yet to be implemented, as it causes mysterious issues I have yet to pinpoint. If you figure out what's happening, let me know.
-- Floating windows don't work (kinda). 
+- Floating windows don't work, because all windows are actually on floating mode. 
 - Certain apps may not behave nicely when being resized or moved at 60Hz.
 
 ## Dependencies
@@ -28,8 +28,8 @@ SniriFX is a rewrite of [citsfsip](https://github.com/Failedex/citsfsip), but in
 
 > [!IMPORTANT]
 > `niri.py` has global variables you need to modify which involves:
-> - `TRUE_SCREEN_HEIGHT`, your screen height in px (important)
-> - `SCREEN`, a rectangle the represents your window display area (you may add gaps and reserve bar space here).
+> - `TRUE_SCREEN_HEIGHT`, your screen height in px
+> - `SCREEN`, a rectangle the represents your window display area (you may add gaps and reserve bar space here)
 
 Additionally, you can also modify: 
 - `DWIDTH`, the change in width when increasing or decreasing window size 
@@ -46,20 +46,22 @@ python niri.py
 
 Default key bindings are shown below 
 
-| Mod4+k                 | focus up     |
-| Mod4+j                 | focus down   |
-| Mod4+h                 | focus left   |
-| Mod4+l                 | focus right  |
-| Mod4+equal             | increase width |
-| Mod4+minus             | decrease width | 
-| Mod4+Shift+c           | screen width |
-| Mod4+Ctrl+h            | merge left |
-| Mod4+Ctrl+l            | merge right |
-| Mod4+Shift+h           | swap left |
-| Mod4+Shift+l           | swap right |
-| Mod4+Shift+j           | swap down |
-| Mod4+Shift+k           | swap up |
-| Mod4+c                 | center |
+| Binding                | Action       |
+| --- | --- |
+| `Mod4+k`                 | focus up     |
+| `Mod4+j`                 | focus down   |
+| `Mod4+h`                 | focus left   |
+| `Mod4+l`                 | focus right  |
+| `Mod4+e`qual             | increase width |
+| `Mod4+m`inus             | decrease width | 
+| `Mod4+Shift+c`           | screen width |
+| `Mod4+Ctrl+h`            | merge left |
+| `Mod4+Ctrl+l`            | merge right |
+| `Mod4+Shift+h`           | swap left |
+| `Mod4+Shift+l`           | swap right |
+| `Mod4+Shift+j`           | swap down |
+| `Mod4+Shift+k`           | swap up |
+| `Mod4+c`                 | center |
 
 These key binds can be changed in line 304 of `niri.py`
 

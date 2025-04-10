@@ -5,16 +5,6 @@ from i3ipc.events import WindowEvent
 import time
 import asyncio
 
-"""
-TODO buglist:
-    - highest window should be focused first
-    - workspaces not being removed
-Add to readme:
-    - mouse_warping none
-    - all bindings
-    - only works on single monitor
-"""
-
 TRUE_SCREEN_HEIGHT = 1080
 SCREEN = Rect(dict(
     x = 5,

@@ -5,11 +5,6 @@ from i3ipc.events import WindowEvent
 import time
 import asyncio
 
-import subprocess
-import os
-import json
-from iconfetch import fetch
-
 """
 TODO buglist:
     - highest window should be focused first
@@ -385,8 +380,6 @@ class Niri(LinkedList):
 
             if new_focus and new_focus.stack and self.current == workspace: 
                 await new_focus.stack.focus(i3)
-            # else:
-            #     await self.updateinfo()
         else: 
             cont.remove(win)
             if self.current == workspace:
@@ -638,7 +631,6 @@ class Niri(LinkedList):
         animid += 1
         passed: bool = False
         async with asyncio.TaskGroup() as tg:
-            # tg.create_task(self.updateinfo())
             wscur = self.stack
             while wscur: 
                 if self.current == wscur:
@@ -654,63 +646,6 @@ class Niri(LinkedList):
                         wcur = wcur.next
                     ccur = ccur.next
                 wscur = wscur.next
-
-    async def updateinfo(self) -> None: 
-        translate = {
-            "com.github.xournalpp.xournalpp": "xournalpp",
-            "sterm": "foot",
-            "sranger": "folder",
-            "sncmpcpp": "music",
-        }
-
-        data = {}
-        data["focus"] = 0
-        data["windows"] = []
-        data["workspace"] = []
-
-        tree = await self.i3.get_tree()
-        ccur = self.current.stack
-        p = 5
-        while ccur: 
-            if ccur == self.current.anchor: 
-                data["focus"] = p + self.current.anchordir*(ccur.width - SCREEN.width) - 5
-
-            wcur = ccur.stack
-            while wcur: 
-                win: Con|None = tree.find_by_id(wcur.id)
-                if win: 
-                    app_id = win.app_id.lower()
-                    app_id = translate.get(app_id, app_id)
-                    path = fetch(app_id) or fetch("unknown")
-                    rect = {}
-                    rect["x"] = p + 5 + 5
-                    rect["y"] = wcur.y - 50 + 5
-                    rect["width"] = wcur.width - 10
-                    rect["height"] = wcur.height - 10
-                    data["windows"].append({
-                        "app_id": win.app_id,
-                        "name": win.name,
-                        "pid": win.pid,
-                        "focused": win.focused,
-                        "rect": rect,
-                        "path": path
-                    })
-                wcur = wcur.next
-
-            p += ccur.width
-
-            ccur = ccur.next
-
-        wscur = self.stack
-        while wscur: 
-            data["workspace"].append(wscur == self.current)
-            wscur = wscur.next
-
-        data["width"] = max(1920, p+5)
-        data = json.dumps(data)
-        eww_bin= [subprocess.getoutput("which eww"), "-c", f"{os.path.expanduser('~/.config/eww/whimsy')}"]
-        subprocess.Popen(eww_bin+["update", f"nirijson={data}"])
-        # print(data, flush=True)
 
 if __name__ == "__main__": 
     animid: int = 0
